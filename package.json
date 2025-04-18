@@ -1,9 +1,9 @@
 {
   "name": "arduino",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "src/main.js",
   "scripts": {
-    "start": "node main.js"
+    "start": "node src/main.js"
   },
   "keywords": [],
   "author": "",
