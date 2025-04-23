@@ -5,7 +5,7 @@ require('dotenv').config();
 
 app.use(express.json());
 
-const PORT = process.env.SERVER_PORT || 3000;
+const SERVER_PORT = process.env.SERVER_PORT || 8080;
 const MASTER_URL = `http://${process.env.MASTER_IP}`;
 
 const fetchFromMaster = async (endpoint) => {
@@ -39,4 +39,4 @@ app.post('/window', async (req, res) => {
     );
 });
 
-app.listen(PORT, () => console.log(`NodeJS API running on port ${PORT}`));
+app.listen(SERVER_PORT, () => console.log(`NodeJS API running on port ${SERVER_PORT}`));
