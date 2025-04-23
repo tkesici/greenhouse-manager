@@ -11,6 +11,8 @@ app.use(express.json());
 
 const randomValue = () => Math.floor(Math.random() * 90 + 10);
 
+app.get('/', (req, res ) => res.json({message: 'arduino-simulation'}));
+
 app.post('/window', (req, res) => {
     windowState = req.body.window;
     console.log('Window state set to:', windowState)
