@@ -26,6 +26,7 @@ const createGetHandler = (endpoint) => {
     };
 }
 
+app.get('/', (req, res ) => res.json({message: 'greenhouse-manager'}));
 app.get('/window', createGetHandler('/window'));
 app.get('/humidity', createGetHandler('/humidity'));
 app.get('/temperature', createGetHandler('/temperature'));
