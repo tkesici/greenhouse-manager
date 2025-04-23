@@ -4,7 +4,7 @@
   "main": "src/main.js",
   "scripts": {
     "start": "node src/main.js",
-    "simulatoion": "node src/arduino-simulation.js"
+    "simulation": "node src/arduino-simulation.js"
   },
   "keywords": [],
   "author": "",
