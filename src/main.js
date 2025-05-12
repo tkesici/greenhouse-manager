@@ -229,4 +229,26 @@ app.get('/arduino/tenant/:tenantId/greenhouse/:greenhouseId/push/:temperature/:h
     }
 });
 
+app.get('/arduino/tenant/:tenantId/greenhouse/:greenhouseId/window', async (req, res) => {
+    const tenantId = parseInt(req.params.tenantId, 10);
+    const greenhouseId = parseInt(req.params.greenhouseId, 10);
+    console.log(`API [GET /arduino/tenant/${tenantId}/greenhouse/${greenhouseId}/window] called.`);
+
+    if (isNaN(tenantId) || isNaN(greenhouseId)) {
+        return res.status(400).send('INVALID_ID');
+    }
+
+    const valid = await tenancyCheck(tenantId, greenhouseId);
+    if (!valid) {
+        return res.status(403).send('UNAUTHORIZED');
+    }
+
+    const { success, data, error } = await fetchLatestWindowStatus(greenhouseId);
+    if (success) {
+        res.type('text/plain').send(data?.status || 'UNKNOWN');
+    } else {
+        res.status(500).send('ERROR');
+    }
+});
+
 app.listen(SERVER_PORT, () => console.log(`NodeJS API running on port ${SERVER_PORT}`));
