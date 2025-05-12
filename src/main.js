@@ -6,6 +6,7 @@ const app = express();
 app.use(express.json());
 
 const SERVER_PORT = process.env.SERVER_PORT || 8080;
+const ARDUINO_SECRET_KEY = process.env.ARDUINO_SECRET_KEY;
 
 const dbConfig = {
     user: process.env.DB_USER,
@@ -77,7 +78,7 @@ const fetchLatestWindowStatus = async (greenhouseId) => {
 
 app.get('/', (req, res) => {
     console.log('API root [GET /] called.');
-    res.json({ message: 'greenhouse-manager (MSSQL version, multi-tenant)' });
+    res.json({ message: 'greenhouse-manager' });
 });
 
 app.get('/tenant/:tenantId/greenhouse/:greenhouseId/temperature', async (req, res) => {
@@ -182,6 +183,48 @@ app.post('/tenant/:tenantId/greenhouse/:greenhouseId/window', async (req, res) =
         res.json({ status: 'success', greenhouseId, window });
     } catch (error) {
         console.error('Error in /window POST:', error.message);
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
+
+app.get('/arduino/tenant/:tenantId/greenhouse/:greenhouseId/push/:temperature/:humidity', async (req, res) => {
+    const tenantId = parseInt(req.params.tenantId, 10);
+    const greenhouseId = parseInt(req.params.greenhouseId, 10);
+    const temperature = parseFloat(req.params.temperature);
+    const humidity = parseFloat(req.params.humidity);
+    const key = req.query.key;
+
+    console.log(`Arduino sensor push: Tenant ${tenantId}, Greenhouse ${greenhouseId}, Temp ${temperature}, Humidity ${humidity}`);
+
+    // Validation
+    if (isNaN(tenantId) || isNaN(greenhouseId) || isNaN(temperature) || isNaN(humidity)) {
+        return res.status(400).json({ status: 'error', message: 'Invalid input parameters' });
+    }
+
+    if (key !== ARDUINO_SECRET_KEY) {
+        return res.status(403).json({ status: 'error', message: 'Unauthorized Arduino request' });
+    }
+
+    // Tenancy check
+    const valid = await tenancyCheck(tenantId, greenhouseId);
+    if (!valid) {
+        return res.status(403).json({ status: 'error', message: 'Greenhouse does not belong to tenant' });
+    }
+    try {
+        const pool = await sql.connect(dbConfig);
+        await pool.request()
+            .input('GreenhouseId', sql.Int, greenhouseId)
+            .input('Temperature', sql.Decimal(5, 2), temperature)
+            .input('Humidity', sql.Decimal(5, 2), humidity)
+            .query(`
+                INSERT INTO sensor_data (greenhouse_id, temperature, humidity, recorded_at)
+                VALUES (@GreenhouseId, @Temperature, @Humidity, GETDATE())
+            `);
+
+        console.log('Sensor data inserted.');
+        res.json({ status: 'success', greenhouseId, temperature, humidity });
+    } catch (error) {
+        console.error('SQL error while inserting sensor data:', error.message);
         res.status(500).json({ status: 'error', message: error.message });
     }
 });
