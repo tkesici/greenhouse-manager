@@ -7,10 +7,10 @@ const { authenticateUser, checkRole} = require("./authentication");
 require('dotenv').config();
 
 const app = express();
-app.use(cors({
-    origin: 'http://localhost:5173',
-    credentials: true
-}));
+// app.use(cors({
+//     origin: 'http://localhost:5173',
+//     credentials: true
+// }));
 app.use(express.json());
 // app.use(authenticateUser);
 
@@ -81,6 +81,26 @@ const fetchLatestWindowStatus = async (greenhouseId) => {
         return { success: true, data: result.recordset[0] };
     } catch (err) {
         console.error('SQL error while fetching window status:', err.message);
+        return { success: false, error: err.message };
+    }
+};
+
+const fetchLatestIrrigationStatus = async (greenhouseId) => {
+    console.log(`Fetching latest irrigation status from DB for Greenhouse ID: ${greenhouseId}`);
+    try {
+        const pool = await sql.connect(dbConfig);
+        const result = await pool.request()
+            .input('GreenhouseId', sql.Int, greenhouseId)
+            .query(`
+                SELECT TOP 1 status, changed_by, recorded_at
+                FROM irrigation_status
+                WHERE greenhouse_id = @GreenhouseId
+                ORDER BY recorded_at DESC
+            `);
+        console.log('Irrigation status fetched:', result.recordset[0]);
+        return { success: true, data: result.recordset[0] };
+    } catch (err) {
+        console.error('SQL error while fetching irrigation status:', err.message);
         return { success: false, error: err.message };
     }
 };
@@ -222,6 +242,33 @@ app.get('/tenant/:tenantId/greenhouse/:greenhouseId/window', async (req, res) =>
     }
 });
 
+app.get('/tenant/:tenantId/greenhouse/:greenhouseId/irrigation', async (req, res) => {
+    const tenantId = parseInt(req.params.tenantId, 10);
+    const greenhouseId = parseInt(req.params.greenhouseId, 10);
+    console.log(`API [GET /tenant/${tenantId}/greenhouse/${greenhouseId}/irrigation] called.`);
+
+    if (isNaN(tenantId) || isNaN(greenhouseId)) {
+        return res.status(400).json({ status: 'error', message: 'Invalid tenant or greenhouse ID' });
+    }
+
+    const valid = await tenancyCheck(tenantId, greenhouseId);
+    if (!valid) {
+        return res.status(403).json({ status: 'error', message: 'Greenhouse does not belong to tenant' });
+    }
+
+    const { success, data, error } = await fetchLatestIrrigationStatus(greenhouseId);
+    if (success) {
+        res.json({
+            status: 'success',
+            irrigation: data?.status,
+            changed_by: data?.changed_by,
+            timestamp: data?.recorded_at
+        });
+    } else {
+        res.status(500).json({ status: 'error', message: error });
+    }
+});
+
 app.post('/tenant/:tenantId/greenhouse/:greenhouseId/window', async (req, res) => {
     const tenantId = parseInt(req.params.tenantId, 10);
     const greenhouseId = parseInt(req.params.greenhouseId, 10);
@@ -253,6 +300,41 @@ app.post('/tenant/:tenantId/greenhouse/:greenhouseId/window', async (req, res) =
         res.json({ status: 'success', greenhouseId, window });
     } catch (error) {
         console.error('Error in /window POST:', error.message);
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
+
+app.post('/tenant/:tenantId/greenhouse/:greenhouseId/irrigation', async (req, res) => {
+    const tenantId = parseInt(req.params.tenantId, 10);
+    const greenhouseId = parseInt(req.params.greenhouseId, 10);
+    console.log(`API [POST /tenant/${tenantId}/greenhouse/${greenhouseId}/irrigation] called with body:`, req.body);
+
+    if (isNaN(tenantId) || isNaN(greenhouseId)) {
+        return res.status(400).json({ status: 'error', message: 'Invalid tenant or greenhouse ID' });
+    }
+
+    const valid = await tenancyCheck(tenantId, greenhouseId);
+    if (!valid) {
+        return res.status(403).json({ status: 'error', message: 'Greenhouse does not belong to tenant' });
+    }
+
+    const { irrigation, changed_by = 'user' } = req.body;
+
+    try {
+        console.log(`Logging irrigation command to DB for Greenhouse ID: ${greenhouseId}, Command: ${irrigation}`);
+        const pool = await sql.connect(dbConfig);
+        await pool.request()
+            .input('GreenhouseId', sql.Int, greenhouseId)
+            .input('Status', sql.VarChar(20), irrigation)
+            .input('ChangedBy', sql.VarChar(50), changed_by)
+            .query(`
+                INSERT INTO irrigation_status (greenhouse_id, status, changed_by)
+                VALUES (@GreenhouseId, @Status, @ChangedBy)
+            `);
+        console.log('Irrigation status logged successfully.');
+        res.json({ status: 'success', greenhouseId, irrigation });
+    } catch (error) {
+        console.error('Error in /irrigation POST:', error.message);
         res.status(500).json({ status: 'error', message: error.message });
     }
 });
@@ -320,5 +402,28 @@ app.get('/arduino/tenant/:tenantId/greenhouse/:greenhouseId/window', async (req,
         res.status(500).send('ERROR');
     }
 });
+
+app.get('/arduino/tenant/:tenantId/greenhouse/:greenhouseId/irrigation', async (req, res) => {
+    const tenantId = parseInt(req.params.tenantId, 10);
+    const greenhouseId = parseInt(req.params.greenhouseId, 10);
+    console.log(`API [GET /arduino/tenant/${tenantId}/greenhouse/${greenhouseId}/irrigation] called.`);
+
+    if (isNaN(tenantId) || isNaN(greenhouseId)) {
+        return res.status(400).send('INVALID_ID');
+    }
+
+    const valid = await tenancyCheck(tenantId, greenhouseId);
+    if (!valid) {
+        return res.status(403).send('UNAUTHORIZED');
+    }
+
+    const { success, data, error } = await fetchLatestIrrigationStatus(greenhouseId);
+    if (success) {
+        res.type('text/plain').send(data?.status || 'UNKNOWN');
+    } else {
+        res.status(500).send('ERROR');
+    }
+});
+
 
 app.listen(SERVER_PORT, () => console.log(`NodeJS API running on port ${SERVER_PORT}`));
