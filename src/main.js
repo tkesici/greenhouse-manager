@@ -1,9 +1,18 @@
 const express = require('express');
 const sql = require('mssql');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const cors = require('cors');
+const { authenticateUser, checkRole} = require("./authentication");
 require('dotenv').config();
 
 const app = express();
+app.use(cors({
+    origin: 'http://localhost:5173',
+    credentials: true
+}));
 app.use(express.json());
+// app.use(authenticateUser);
 
 const SERVER_PORT = process.env.SERVER_PORT || 8080;
 const ARDUINO_SECRET_KEY = process.env.ARDUINO_SECRET_KEY;
@@ -79,6 +88,67 @@ const fetchLatestWindowStatus = async (greenhouseId) => {
 app.get('/', (req, res) => {
     console.log('API root [GET /] called.');
     res.json({ message: 'greenhouse-manager' });
+});
+
+app.post('/login', async (req, res) => {
+    console.log('\n=== NEW LOGIN ATTEMPT ===');
+    console.log('Request Body:', req.body);
+
+    if (!req.body || !req.body.username || !req.body.password) {
+        console.log('Missing credentials');
+        return res.status(400).json({ error: 'Username and password required' });
+    }
+
+    const { username, password } = req.body;
+
+    try {
+        const pool = await sql.connect(dbConfig);
+        console.log('Database connected successfully');
+
+        const query = 'SELECT * FROM users WHERE username = @Username';
+        console.log('Executing query:', query);
+
+        const result = await pool.request()
+            .input('Username', sql.VarChar(50), username)
+            .query(query);
+
+        console.log('Query results:', result.recordset);
+
+        if (result.recordset.length === 0) {
+            console.log('User not found');
+            return res.status(401).send('Unauthorized');
+        }
+
+        const user = result.recordset[0];
+        console.log('Found user:', user.username);
+
+        console.log('Comparing password with hash:', user.password_hash);
+        const valid = await bcrypt.compare(password, user.password_hash);
+        console.log('Password match result:', valid);
+
+        if (!valid) {
+            console.log('Invalid password');
+            return res.status(401).send('Unauthorized');
+        }
+
+        console.log('Generating JWT token');
+        const token = jwt.sign(
+            { id: user.id, tenant_id: user.tenant_id, role: user.role },
+            process.env.JWT_SECRET || 'fallback_secret',
+            { expiresIn: '1h' }
+        );
+
+        console.log('Login successful');
+        res.json({ status: 'success', token });
+
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/admin-only', checkRole('admin'), (req, res) => {
+    res.json({ message: 'Admin access granted' });
 });
 
 app.get('/tenant/:tenantId/greenhouse/:greenhouseId/temperature', async (req, res) => {
