@@ -1,17 +1,25 @@
 const jwt = require('jsonwebtoken');
+const dotenv = require('dotenv');
 const JWT_SECRET = process.env.JWT_SECRET;
 
-const authenticateUser = (req, res, next) => {
+dotenv.config();
+
+const authMiddleware = (req, res, next) => {
+    const authEnabled = process.env.AUTH_ENABLED === 'true';
+    if (!authEnabled) {
+        console.log('[AuthMiddleware] AUTH_ENABLED=false → Auth middleware skipped');
+        return next();
+    }
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    if (!authHeader) return res.status(401).send('Missing token');
 
-    if (!token) return res.sendStatus(401);
-
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) return res.sendStatus(403);
-        req.user = user;
+    const token = authHeader.split(' ')[1];
+    try {
+        req.user = jwt.verify(token, JWT_SECRET);
         next();
-    });
+    } catch (err) {
+        return res.status(403).send('Invalid token');
+    }
 };
 
 const checkRole = (role) => (req, res, next) => {
@@ -20,6 +28,6 @@ const checkRole = (role) => (req, res, next) => {
 };
 
 module.exports = {
-    authenticateUser,
+    authenticateUser: authMiddleware,
     checkRole
 };

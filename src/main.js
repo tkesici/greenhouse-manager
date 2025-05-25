@@ -3,16 +3,12 @@ const sql = require('mssql');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
-const { authenticateUser, checkRole} = require("./authentication");
+const { checkRole} = require("./authentication");
 require('dotenv').config();
 
 const app = express();
-// app.use(cors({
-//     origin: 'http://localhost:5173',
-//     credentials: true
-// }));
+app.use(cors());
 app.use(express.json());
-// app.use(authenticateUser);
 
 const SERVER_PORT = process.env.SERVER_PORT || 8080;
 const ARDUINO_SECRET_KEY = process.env.ARDUINO_SECRET_KEY;
@@ -125,21 +121,21 @@ app.post('/login', async (req, res) => {
         const pool = await sql.connect(dbConfig);
         console.log('Database connected successfully');
 
-        const query = 'SELECT * FROM users WHERE username = @Username';
-        console.log('Executing query:', query);
+        const userQuery = 'SELECT * FROM users WHERE username = @Username';
+        console.log('Executing user query:', userQuery);
 
-        const result = await pool.request()
+        const userResult = await pool.request()
             .input('Username', sql.VarChar(50), username)
-            .query(query);
+            .query(userQuery);
 
-        console.log('Query results:', result.recordset);
+        console.log('Query results:', userResult.recordset);
 
-        if (result.recordset.length === 0) {
+        if (userResult.recordset.length === 0) {
             console.log('User not found');
             return res.status(401).send('Unauthorized');
         }
 
-        const user = result.recordset[0];
+        const user = userResult.recordset[0];
         console.log('Found user:', user.username);
 
         console.log('Comparing password with hash:', user.password_hash);
@@ -151,7 +147,21 @@ app.post('/login', async (req, res) => {
             return res.status(401).send('Unauthorized');
         }
 
-        console.log('Generating JWT token');
+        const greenhouseQuery = `
+            SELECT id, tenant_id, name, location
+            FROM greenhouses
+            WHERE tenant_id = @TenantId
+        `;
+
+        console.log('Executing greenhouse query:', greenhouseQuery);
+
+        const greenhouseResult = await pool.request()
+            .input('TenantId', sql.Int, user.tenant_id)
+            .query(greenhouseQuery);
+
+        const greenhouses = greenhouseResult.recordset;
+        console.log('Accessible greenhouses:', greenhouses);
+
         const token = jwt.sign(
             { id: user.id, tenant_id: user.tenant_id, role: user.role },
             process.env.JWT_SECRET || 'fallback_secret',
@@ -159,7 +169,18 @@ app.post('/login', async (req, res) => {
         );
 
         console.log('Login successful');
-        res.json({ status: 'success', token });
+
+        res.json({
+            status: 'success',
+            token: token,
+            user: {
+                id: user.id,
+                username: user.username,
+                tenant_id: user.tenant_id,
+                role: user.role,
+            },
+            greenhouses: greenhouses
+        });
 
     } catch (error) {
         console.error('Login error:', error);
@@ -422,6 +443,130 @@ app.get('/arduino/tenant/:tenantId/greenhouse/:greenhouseId/irrigation', async (
         res.type('text/plain').send(data?.status || 'UNKNOWN');
     } else {
         res.status(500).send('ERROR');
+    }
+});
+
+app.get('/tenant/:tenantId/greenhouses', async (req, res) => {
+    const tenantId = parseInt(req.params.tenantId, 10);
+    console.log(`API [GET /tenant/${tenantId}/greenhouses] called.`);
+
+    if (isNaN(tenantId)) {
+        return res.status(400).json({ status: 'error', message: 'Invalid tenant ID' });
+    }
+
+    try {
+        const pool = await sql.connect(dbConfig);
+
+        const query = `
+            SELECT id, name, location
+            FROM greenhouses
+            WHERE tenant_id = @TenantId
+        `;
+
+        const result = await pool.request()
+            .input('TenantId', sql.Int, tenantId)
+            .query(query);
+
+        if( result.recordset.length === 0) {
+            return res.status(404).json({ status: 'error', message: 'No greenhouses found for this tenant' });
+        }
+        console.log('Greenhouses fetched:', result.recordset);
+        res.status(200).json({ status: 'success', greenhouses: result.recordset });
+    } catch (error) {
+        console.error('Error fetching greenhouses:', error);
+        res.status(500).json({ status: 'error', message: 'Internal server error' });
+    }
+});
+
+app.get('/greenhouse/:greenhouseId/sensors', async (req, res) => {
+    const greenhouseId = parseInt(req.params.greenhouseId, 10);
+    console.log(`API [GET /greenhouse/${greenhouseId}/sensors] called.`);
+
+    if (isNaN(greenhouseId)) {
+        return res.status(400).json({ status: 'error', message: 'Invalid greenhouse ID' });
+    }
+
+    try {
+        const pool = await sql.connect(dbConfig);
+        const checkQuery = `SELECT COUNT(*) as count FROM greenhouses WHERE id = @GreenhouseId`;
+        const checkResult = await pool.request()
+            .input('GreenhouseId', sql.Int, greenhouseId)
+            .query(checkQuery);
+
+        if (checkResult.recordset[0].count === 0) {
+            return res.status(404).json({ status: 'error', message: 'Greenhouse not found' });
+        }
+        const query = `
+            SELECT
+                temperature,
+                humidity,
+                recorded_at
+            FROM sensor_data
+            WHERE
+                greenhouse_id = @GreenhouseId
+            ORDER BY recorded_at ASC
+        `;
+
+        const result = await pool.request()
+            .input('GreenhouseId', sql.Int, greenhouseId)
+            .query(query);
+
+        res.json({
+            status: 'success',
+            data: result.recordset
+        });
+
+    } catch (error) {
+        console.error('Error fetching sensor data:', error);
+        res.status(500).json({ status: 'error', message: 'Internal server error' });
+    }
+});
+
+app.get('/greenhouse/:greenhouseId/irrigation-history', async (req, res) => {
+    const greenhouseId = parseInt(req.params.greenhouseId, 10);
+    console.log(`API [GET /greenhouse/${greenhouseId}/irrigation-history] called.`);
+
+    if (isNaN(greenhouseId)) {
+        return res.status(400).json({ status: 'error', message: 'Invalid greenhouse ID' });
+    }
+
+    try {
+        const pool = await sql.connect(dbConfig);
+
+        const checkQuery = `
+            SELECT COUNT(*) as count FROM greenhouses WHERE id = @GreenhouseId
+        `;
+        const checkResult = await pool.request()
+            .input('GreenhouseId', sql.Int, greenhouseId)
+            .query(checkQuery);
+
+        if (checkResult.recordset[0].count === 0) {
+            return res.status(404).json({ status: 'error', message: 'Greenhouse not found' });
+        }
+
+        const dataQuery = `
+            SELECT
+                status,
+                changed_by,
+                recorded_at
+            FROM irrigation_status
+            WHERE
+                greenhouse_id = @GreenhouseId
+            ORDER BY recorded_at ASC
+        `;
+
+        const result = await pool.request()
+            .input('GreenhouseId', sql.Int, greenhouseId)
+            .query(dataQuery);
+
+        res.json({
+            status: 'success',
+            data: result.recordset
+        });
+
+    } catch (error) {
+        console.error('Error fetching irrigation status:', error);
+        res.status(500).json({ status: 'error', message: 'Internal server error' });
     }
 });
 
