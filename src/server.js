@@ -23,17 +23,18 @@ export const createServer = () => {
     app.listen(SERVER_PORT, () => console.log(`Greenhouse Manager API running on port ${SERVER_PORT}`));
 
     app.get('/', (req, res) => {
-        console.log('API root [GET /] called.');
+        console.log(new Date(), '> [GET /] called');
         res.json({message: 'greenhouse-manager'});
     });
 
     app.post('/login', async (req, res) => {
-        console.log('\n=== NEW LOGIN ATTEMPT ===');
-        console.log('Request Body:', req.body);
+        console.log(new Date(), '> [POST /login] called with', req.body);
 
         if (!req.body || !req.body.username || !req.body.password) {
-            console.log('Missing credentials');
-            return res.status(400).json({error: 'Username and password required'});
+            console.log(new Date(), '> [POST /login] failed: Missing credentials');
+            return res.status(400).json({
+                success: false, error: 'Missing credentials', message: 'Username and password are required.'
+            });
         }
 
         const {username, password} = req.body;
@@ -45,90 +46,74 @@ export const createServer = () => {
                 .input('Username', sql.VarChar(50), username)
                 .query(userQuery);
 
-            console.log('Query results:', userResult.recordset);
-
             if (userResult.recordset.length === 0) {
-                console.log('User not found');
+                console.log(new Date(), '> [POST /login] failed: User not found');
                 return res.status(404).send({
-                    success: false,
-                    message: 'User not found',
+                    success: false, error: 'User not found',
                 });
             }
 
             const user = userResult.recordset[0];
-            console.log('Found user:', user.username);
-
-            console.log('Comparing password with hash:', user.password_hash);
             const valid = await bcrypt.compare(password, user.password_hash);
-            console.log('Password match result:', valid);
 
             if (!valid) {
-                console.log('Invalid username or password.');
+                console.log(new Date(), '> [POST /login] failed: Invalid username or password');
                 return res.status(401).send({
-                    success: false,
-                    message: 'Invalid username or password.',
+                    success: false, message: 'Invalid username or password.',
                 });
             }
 
             const greenhouseQuery = `
-            SELECT id, tenant_id, name, location
-            FROM greenhouses
-            WHERE tenant_id = @TenantId
-        `;
+                SELECT id, tenant_id, name, location
+                FROM greenhouses
+                WHERE tenant_id = @TenantId
+            `;
 
             const greenhouseResult = await connectionPool.request()
                 .input('TenantId', sql.Int, user.tenant_id)
                 .query(greenhouseQuery);
 
             const greenhouses = greenhouseResult.recordset;
-            console.log('Accessible greenhouses:', greenhouses);
-
             let token;
 
             try {
-                token = jwt.sign(
-                    { id: user.id, tenant_id: user.tenant_id, role: user.role },
-                    JWT_SECRET,
-                    { expiresIn: '1h' }
-                );
+                token = jwt.sign({
+                    id: user.id,
+                    tenant_id: user.tenant_id,
+                    role: user.role
+                }, JWT_SECRET, {expiresIn: '1h'});
             } catch (err) {
-                console.error('JWT signing error:', err);
-                return res.status(500).json({ error: 'Failed to generate authentication token.' });
+                console.error(new Date(), '> [POST /login] JWT signing error: ', err);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Failed to generate authentication token.'
+                });
             }
 
-            console.log('Login successful');
+            console.log(new Date(), '> [POST /login] Login successful');
 
             res.json({
-                status: 'success',
-                token: token,
-                user: {
-                    id: user.id,
-                    username: user.username,
-                    tenant_id: user.tenant_id,
-                    role: user.role,
-                },
-                greenhouses: greenhouses
+                status: 'success', token: token, user: {
+                    id: user.id, username: user.username, tenant_id: user.tenant_id, role: user.role,
+                }, greenhouses: greenhouses
             });
 
         } catch (error) {
-            console.error('Login error:', error);
+            console.log(new Date(), '> [POST /login] Error: ', error);
             res.status(500).json({
-                success: false,
-                error: 'Internal server error',
-                message: error?.message,
+                success: false, error: 'Internal server error', message: error?.message,
             });
         }
     });
 
     app.post('/register', async (req, res) => {
-        console.log('\n=== NEW REGISTER ATTEMPT ===');
-        console.log('Request Body:', req.body);
+        console.log(new Date(), '> [POST /register] called with', req.body);
 
-        const { username, password, tenant_id } = req.body;
+        const {username, password, tenant_id} = req.body;
 
         if (!username || !password) {
-            console.log('Missing required fields');
-            return res.status(400).json({ success: false, error: 'Username and password are required.' });
+            console.log(new Date(), '> [POST /login] failed: Username and password are required');
+            return res.status(400).json({success: false, error: 'Username and password are required.'});
         }
 
         try {
@@ -137,8 +122,8 @@ export const createServer = () => {
                 .query('SELECT id FROM users WHERE username = @Username');
 
             if (existingUser.recordset.length > 0) {
-                console.log('Username already exists');
-                return res.status(409).json({ error: 'Username already exists' });
+                console.log(new Date(), '> [POST /register] failed: Username already exists');
+                return res.status(409).json({error: 'Username already exists'});
             }
 
             let resolvedTenantId = tenant_id;
@@ -152,27 +137,23 @@ export const createServer = () => {
                     const newTenant = await connectionPool.request()
                         .input('Name', sql.VarChar(100), `Auto-created tenant for ${username}`)
                         .query(`
-                        INSERT INTO tenants (name)
-                        OUTPUT INSERTED.id
-                        VALUES (@Name)
-                    `);
+                            INSERT INTO tenants (name)
+                                OUTPUT INSERTED.id
+                            VALUES (@Name)
+                        `);
 
                     resolvedTenantId = newTenant.recordset[0].id;
-                    console.log(`Provided tenant_id (${tenant_id}) was invalid; new tenant created with ID ${resolvedTenantId}`);
-                } else {
-                    console.log(`Using existing tenant ID: ${tenant_id}`);
                 }
             } else {
                 const newTenant = await connectionPool.request()
                     .input('Name', sql.VarChar(100), `Default Tenant for ${username}`)
                     .query(`
-                    INSERT INTO tenants (name)
-                    OUTPUT INSERTED.id
-                    VALUES (@Name)
-                `);
+                        INSERT INTO tenants (name)
+                            OUTPUT INSERTED.id
+                        VALUES (@Name)
+                    `);
 
                 resolvedTenantId = newTenant.recordset[0].id;
-                console.log(`No tenant ID provided; new tenant created with ID ${resolvedTenantId}`);
             }
 
             const passwordHash = await bcrypt.hash(password, 10);
@@ -182,26 +163,24 @@ export const createServer = () => {
                 .input('Username', sql.VarChar(50), username)
                 .input('PasswordHash', sql.VarChar(255), passwordHash)
                 .query(`
-                INSERT INTO users (tenant_id, username, password_hash, role, created_at)
-                OUTPUT INSERTED.id
-                VALUES (@TenantId, @Username, @PasswordHash, 'user', GETDATE())
-            `);
+                    INSERT INTO users (tenant_id, username, password_hash, role, created_at)
+                        OUTPUT INSERTED.id
+                    VALUES (@TenantId, @Username, @PasswordHash, 'user', GETDATE())
+                `);
 
             const userId = newUser.recordset[0].id;
 
             return res.status(201).json({
-                status: 'success',
-                message: 'User registered successfully',
-                user: {
-                    id: userId,
-                    username,
-                    tenant_id: resolvedTenantId,
+                status: 'success', message: 'User registered successfully', user: {
+                    id: userId, username, tenant_id: resolvedTenantId,
                 }
             });
 
         } catch (error) {
-            console.error('Register error:', error);
-            return res.status(500).json({ error: 'Internal server error' });
+            console.error(new Date(), '> [POST /register] error: ', error?.message);
+            return res.status(500).json({
+                success: false, error: 'Internal server error', message: error?.message,
+            });
         }
     });
 
@@ -266,10 +245,7 @@ export const createServer = () => {
         const {success, data, error} = await fetchLatestWindowStatus(greenhouseId);
         if (success) {
             res.json({
-                status: 'success',
-                window: data?.status,
-                changed_by: data?.changed_by,
-                timestamp: data?.recorded_at
+                status: 'success', window: data?.status, changed_by: data?.changed_by, timestamp: data?.recorded_at
             });
         } else {
             res.status(500).json({status: 'error', message: error});
@@ -293,10 +269,7 @@ export const createServer = () => {
         const {success, data, error} = await fetchLatestIrrigationStatus(greenhouseId);
         if (success) {
             res.json({
-                status: 'success',
-                irrigation: data?.status,
-                changed_by: data?.changed_by,
-                timestamp: data?.recorded_at
+                status: 'success', irrigation: data?.status, changed_by: data?.changed_by, timestamp: data?.recorded_at
             });
         } else {
             res.status(500).json({status: 'error', message: error});
@@ -326,9 +299,9 @@ export const createServer = () => {
                 .input('Status', sql.VarChar(20), window)
                 .input('ChangedBy', sql.VarChar(50), changed_by)
                 .query(`
-                INSERT INTO window_status (greenhouse_id, status, changed_by)
-                VALUES (@GreenhouseId, @Status, @ChangedBy)
-            `);
+                    INSERT INTO window_status (greenhouse_id, status, changed_by)
+                    VALUES (@GreenhouseId, @Status, @ChangedBy)
+                `);
             console.log('Window status logged successfully.');
             res.json({status: 'success', greenhouseId, window});
         } catch (error) {
@@ -360,9 +333,9 @@ export const createServer = () => {
                 .input('Status', sql.VarChar(20), irrigation)
                 .input('ChangedBy', sql.VarChar(50), changed_by)
                 .query(`
-                INSERT INTO irrigation_status (greenhouse_id, status, changed_by)
-                VALUES (@GreenhouseId, @Status, @ChangedBy)
-            `);
+                    INSERT INTO irrigation_status (greenhouse_id, status, changed_by)
+                    VALUES (@GreenhouseId, @Status, @ChangedBy)
+                `);
             console.log('Irrigation status logged successfully.');
             res.json({status: 'success', greenhouseId, irrigation});
         } catch (error) {
@@ -400,9 +373,9 @@ export const createServer = () => {
                 .input('Temperature', sql.Decimal(5, 2), temperature)
                 .input('Humidity', sql.Decimal(5, 2), humidity)
                 .query(`
-                INSERT INTO sensor_data (greenhouse_id, temperature, humidity, recorded_at)
-                VALUES (@GreenhouseId, @Temperature, @Humidity, GETDATE())
-            `);
+                    INSERT INTO sensor_data (greenhouse_id, temperature, humidity, recorded_at)
+                    VALUES (@GreenhouseId, @Temperature, @Humidity, GETDATE())
+                `);
 
             console.log('Sensor data inserted.');
             res.json({status: 'success', greenhouseId, temperature, humidity});
@@ -472,10 +445,10 @@ export const createServer = () => {
 
         try {
             const query = `
-            SELECT id, name, location
-            FROM greenhouses
-            WHERE tenant_id = @TenantId
-        `;
+                SELECT id, name, location
+                FROM greenhouses
+                WHERE tenant_id = @TenantId
+            `;
 
             const result = await connectionPool.request()
                 .input('TenantId', sql.Int, tenantId)
@@ -502,8 +475,8 @@ export const createServer = () => {
 
         try {
             const checkQuery = `SELECT COUNT(*) as count
-                            FROM greenhouses
-                            WHERE id = @GreenhouseId`;
+                                FROM greenhouses
+                                WHERE id = @GreenhouseId`;
             const checkResult = await connectionPool.request()
                 .input('GreenhouseId', sql.Int, greenhouseId)
                 .query(checkQuery);
@@ -512,21 +485,20 @@ export const createServer = () => {
                 return res.status(404).json({status: 'error', message: 'Greenhouse not found'});
             }
             const query = `
-            SELECT temperature,
-                   humidity,
-                   recorded_at
-            FROM sensor_data
-            WHERE greenhouse_id = @GreenhouseId
-            ORDER BY recorded_at ASC
-        `;
+                SELECT temperature,
+                       humidity,
+                       recorded_at
+                FROM sensor_data
+                WHERE greenhouse_id = @GreenhouseId
+                ORDER BY recorded_at ASC
+            `;
 
             const result = await connectionPool.request()
                 .input('GreenhouseId', sql.Int, greenhouseId)
                 .query(query);
 
             res.json({
-                status: 'success',
-                data: result.recordset
+                status: 'success', data: result.recordset
             });
 
         } catch (error) {
@@ -545,10 +517,10 @@ export const createServer = () => {
 
         try {
             const checkQuery = `
-            SELECT COUNT(*) as count
-            FROM greenhouses
-            WHERE id = @GreenhouseId
-        `;
+                SELECT COUNT(*) as count
+                FROM greenhouses
+                WHERE id = @GreenhouseId
+            `;
             const checkResult = await connectionPool.request()
                 .input('GreenhouseId', sql.Int, greenhouseId)
                 .query(checkQuery);
@@ -558,21 +530,20 @@ export const createServer = () => {
             }
 
             const dataQuery = `
-            SELECT status,
-                   changed_by,
-                   recorded_at
-            FROM irrigation_status
-            WHERE greenhouse_id = @GreenhouseId
-            ORDER BY recorded_at ASC
-        `;
+                SELECT status,
+                       changed_by,
+                       recorded_at
+                FROM irrigation_status
+                WHERE greenhouse_id = @GreenhouseId
+                ORDER BY recorded_at ASC
+            `;
 
             const result = await connectionPool.request()
                 .input('GreenhouseId', sql.Int, greenhouseId)
                 .query(dataQuery);
 
             res.json({
-                status: 'success',
-                data: result.recordset
+                status: 'success', data: result.recordset
             });
 
         } catch (error) {
