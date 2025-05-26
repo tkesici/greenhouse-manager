@@ -5,7 +5,7 @@ import {isAdmin} from "./helpers.js";
 
 dotenv.config();
 
-const JWT_SECRET = 'a0aa12b6e5053904cce53cbf718c8f6d8a6d3d4cdf33e61e1f7ea88b6e0b1f07e78e7de91e556a524a2cef972176c3c705ebb8aadb23fcb9f700e455ccb77827';
+export const JWT_SECRET = 'a0aa12b6e5053904cce53cbf718c8f6d8a6d3d4cdf33e61e1f7ea88b6e0b1f07e78e7de91e556a524a2cef972176c3c705ebb8aadb23fcb9f700e455ccb77827';
 const AUTH_ENABLED = true;
 const bypassRoutes = ['/','/login', '/register'];
 

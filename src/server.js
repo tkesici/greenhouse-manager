@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 
 import {fetchLatestIrrigationStatus, fetchLatestSensorData, fetchLatestWindowStatus, tenancyCheck} from "./helpers.js";
 import {connectionPool} from "./db-config.js";
-import {authMiddleware, isAdminMiddleware} from "./authentication.js";
+import {authMiddleware, isAdminMiddleware, JWT_SECRET} from "./authentication.js";
 
 dotenv.config();
 
@@ -88,7 +88,7 @@ export const createServer = () => {
             try {
                 token = jwt.sign(
                     { id: user.id, tenant_id: user.tenant_id, role: user.role },
-                    process.env.JWT_SECRET,
+                    JWT_SECRET,
                     { expiresIn: '1h' }
                 );
             } catch (err) {
