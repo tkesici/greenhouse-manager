@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 
 import {fetchLatestIrrigationStatus, fetchLatestSensorData, fetchLatestWindowStatus, tenancyCheck} from "./helpers.js";
 import {connectionPool} from "./db-config.js";
-import {authMiddleware, isAdminMiddleware, JWT_SECRET} from "./authentication.js";
+import {authMiddleware, JWT_SECRET} from "./authentication.js";
 
 dotenv.config();
 
@@ -112,7 +112,11 @@ export const createServer = () => {
 
         } catch (error) {
             console.error('Login error:', error);
-            res.status(500).json({error: 'Internal server error'});
+            res.status(500).json({
+                success: false,
+                error: 'Internal server error',
+                message: error?.message,
+            });
         }
     });
 
@@ -452,7 +456,7 @@ export const createServer = () => {
         }
     });
 
-    app.get('/tenant/:tenantId/greenhouses', isAdminMiddleware, async (req, res) => {
+    app.get('/tenant/:tenantId/greenhouses', async (req, res) => {
         const tenantId = parseInt(req.params.tenantId, 10);
         console.log(`API [GET /tenant/${tenantId}/greenhouses] called.`);
 
