@@ -6,7 +6,7 @@ import {isAdmin} from "./helpers.js";
 dotenv.config();
 
 const JWT_SECRET = process.env.JWT_SECRET;
-const AUTH_ENABLED = process.env.AUTH_ENABLED === 'true';
+const AUTH_ENABLED = true;
 const bypassRoutes = ['/','/login', '/register'];
 
 const extractTokenFromHeader = (req) => {
