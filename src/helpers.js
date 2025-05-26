@@ -4,19 +4,27 @@ import {dbConfig} from "./db-config.js";
 export const tenancyCheck = async (tenantId, greenhouseId) => {
     try {
         const pool = await sql.connect(dbConfig);
-        const result = await pool.request()
-            .input('TenantId', sql.Int, tenantId)
-            .input('GreenhouseId', sql.Int, greenhouseId)
-            .query(`
-                SELECT 1 FROM greenhouses
-                WHERE id = @GreenhouseId AND tenant_id = @TenantId
-            `);
+        const request = pool.request()
+            .input('TenantId', sql.Int, tenantId);
+
+        let query = `
+            SELECT 1 FROM greenhouses
+            WHERE tenant_id = @TenantId
+        `;
+
+        if (greenhouseId !== undefined && greenhouseId !== null) {
+            request.input('GreenhouseId', sql.Int, greenhouseId);
+            query += ' AND id = @GreenhouseId';
+        }
+
+        const result = await request.query(query);
         return result.recordset.length > 0;
     } catch (err) {
         console.error('SQL error while checking greenhouse ownership:', err.message);
         return false;
     }
 };
+
 
 export const isAdmin = async (userId) => {
     try {

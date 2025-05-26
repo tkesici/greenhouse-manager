@@ -464,6 +464,12 @@ export const createServer = () => {
             return res.status(400).json({status: 'error', message: 'Invalid tenant ID'});
         }
 
+        const valid = await tenancyCheck(tenantId, null);
+
+        if (!valid) {
+            return res.status(403).json({status: 'error', message: 'Greenhouse does not belong to tenant'});
+        }
+
         try {
             const query = `
             SELECT id, name, location
